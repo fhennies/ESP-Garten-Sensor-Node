@@ -1,7 +1,3 @@
-    /*
-     *  Simple HTTP get webclient test
-     */
-
     #include "config.h"
     #include <ESP8266WiFi.h>
     #include <OneWire.h>
@@ -9,15 +5,23 @@
 
     // Data wire is plugged into pin 2
     #define ONE_WIRE_BUS 4
+    #define HOST "data.sparkfun.com"
+    #define HOSTIFTTT "maker.ifttt.com"
+    #define HTTPPORT 80
 
-    #define DEBUG
+
+//    #define DEBUG
 
     #ifdef DEBUG
     #define DEBUG_PRINT(x)  Serial.print (x)
     #define DEBUG_PRINTLN(x)  Serial.println (x)
+    #define DEBUG_START(x) Serial.begin(x)
+    #define DEBUG_DELAY(x) delay(x)
     #else
     #define DEBUG_PRINT(x)
     #define DEBUG_PRINTLN(x)
+    #define DEBUG_START(x)
+    #define DEBUG_DELAY(x)
     #endif
 
     // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
@@ -26,101 +30,23 @@
     // Pass our oneWire reference to Dallas Temperature. 
     DallasTemperature sensors(&oneWire);
 
-    // helper functions for constructing the POST data
-    // append a string or int to a buffer, return the resulting end of string
-
-    char *append_str(char *here, char *s) {
-      while (*here++ = *s++)
-        ;
-      return here-1;
-    }
-
-    char *append_ul(char *here, unsigned long u) {
-      char buf[20];       // we "just know" this is big enough
-      return append_str(here, ultoa(u, buf, 10));
-    }
-
-
-    const char* host = "data.sparkfun.com";
-    const char* hostIfttt = "maker.ifttt.com";
-    
     float temperature = 20;
     float temperature1 = 20;
     float voltage = 0;
 
     long startMillis;
 
-    void setup() {
-
-      pinMode(A0, INPUT);
-
-#ifdef DEBUG
-      Serial.begin(115200);
-      delay(100);
-#endif
-     
-      // We start by connecting to a WiFi network
-     
-      DEBUG_PRINTLN();
-      DEBUG_PRINTLN();
-      DEBUG_PRINT("Connecting to ");
-      DEBUG_PRINTLN(WIFI_SSID);
-
-      startMillis = millis();
-      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-      
-      while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        DEBUG_PRINT(".");
-        if (millis()-startMillis > 10000) {
-          DEBUG_PRINTLN("WiFi timeout");
-          ESP.deepSleep(10 * 60 * 1000000);
-        }
-      }
-
-      DEBUG_PRINTLN("");
-      DEBUG_PRINTLN("WiFi connected");  
-      DEBUG_PRINTLN("IP address: ");
-      DEBUG_PRINTLN(WiFi.localIP());
-
-      voltage = analogRead(A0) * 8.0913 / 1000;
-      if (voltage < 6.6) {
-        DEBUG_PRINTLN("Voltage low, go to sleep");
-//        ESP.deepSleep(60 * 60 * 1000000);
-      }
-
-      // Start up the DS sensor library
-      sensors.setResolution(12);
-      sensors.begin(); // IC Default 9 bit. If you have troubles consider upping it 12. Ups the delay giving the IC more time to process the temperature measurement
-    }
-     
-    
-    void loop() {
-
-      // call sensors.requestTemperatures() to issue a global temperature 
-      // request to all devices on the bus
-      sensors.requestTemperatures(); // Send the command to get temperatures
-      temperature = sensors.getTempCByIndex(0); // Why "byIndex"? You can have more than one IC on the same bus. 0 refers to the first IC on the wire
-      temperature1 = sensors.getTempCByIndex(1); // Why "byIndex"? You can have more than one IC on the same bus. 0 refers to the first IC on the wire
-
-      DEBUG_PRINT("Temperatures - Device 0: ");
-      DEBUG_PRINT(temperature);
-      DEBUG_PRINT(" Device 1: ");
-      DEBUG_PRINT(temperature1);
-      DEBUG_PRINT(" - Voltage: ");
-      DEBUG_PRINTLN(voltage);
-  
+    void updateSparkFun() {
       DEBUG_PRINTLN("connecting to ");
-      DEBUG_PRINTLN(host);
+      DEBUG_PRINTLN(HOST);
 
       // Use WiFiClient class to create TCP connections
       WiFiClient client;
-      const int httpPort = 80;
       
-      if (!client.connect(host, httpPort)) {
+      if (!client.connect(HOST, HTTPPORT)) {
         DEBUG_PRINTLN("connection failed");
         if (millis()-startMillis > 20000) {
-          DEBUG_PRINTLN("Connection timeout");
+          DEBUG_PRINTLN("Connection timeout, go to sleep for 10 minutes");
           ESP.deepSleep(10 * 60 * 1000000);
         }
         return;
@@ -134,61 +60,106 @@
       
       // This will send the request to the server
       client.print(String("GET ") + url + " HTTP/1.1\r\n" +
-                   "Host: " + host + "\r\n" + 
+                   "Host: " + HOST + "\r\n" + 
                    "Connection: close\r\n\r\n");
       delay(500);
+    }
 
-      if (voltage < 6.8) {
-         DEBUG_PRINTLN("Voltage low, connecting to ");
-         DEBUG_PRINTLN(hostIfttt);
+    void triggerIfttt() {
+         DEBUG_PRINTLN("connecting to ");
+         DEBUG_PRINTLN(HOSTIFTTT);
+
+         WiFiClient client;
+
          
-         if (!client.connect(hostIfttt, httpPort)) {
+         if (!client.connect(HOSTIFTTT, HTTPPORT)) {
           DEBUG_PRINTLN("connection failed");
           if (millis()-startMillis > 30000) {
-          DEBUG_PRINTLN("Connection timeout");
+          DEBUG_PRINTLN("Connection timeout, go to sleep for 10 minutes");
           ESP.deepSleep(10 * 60 * 1000000);
          }
          return;
         }
 
-        // construct the POST request
-        String post_rqst = "POST /trigger/battery_low/with/key/" + String(IFTT_KEY) +" HTTP/1.1\r\n" + "Host: " + hostIfttt + "\r\n"
-                           "Content-Type: application/json\r\n" + "Content-Length: ");
+        // construct the JSON
+        String postJson = "{\"value1\":\"" + String(millis()) + "\",\"value2\":\"" + temperature + "\",\"value3\":\"" + voltage + "\"}";
 
-        // we need to remember where the content length will go, which is:
-        // it's always two digits, so reserve space for them (the NN)
-        p = append_str(p, "NN\r\n");
-
-        // end of headers
-        p = append_str(p, "\r\n");
-
-        // construct the JSON; remember where we started so we will know len
-        char *json_start = p;
-
-        // As described - this example reports a pin, uptime, and "hello world"
-        p = append_str(p, "{\"value1\":\"");
-        p = append_ul(p, millis());
-        p = append_str(p, "\",\"value2\":\"");
-        p = append_ul(p, temperature);
-        p = append_str(p, "\",\"value3\":\"");
-        p = append_ul(p, voltage);
-        p = append_str(p, "\"}");
-
-        // go back and fill in the JSON length
-        // we just know this is at most 2 digits (and need to fill in both)
-        int i = strlen(json_start);
-        content_length_here[0] = '0' + (i/10);
-        content_length_here[1] = '0' + (i%10);
-
+        String postRqst = "POST /trigger/battery_low/with/key/" + String(IFTT_KEY) +" HTTP/1.1\r\n" + "Host: " + HOSTIFTTT + "\r\n"
+                           "Content-Type: application/json\r\n" + "Content-Length: " + postJson.length() + "\r\n\r\n" + postJson;
+        
         // finally we are ready to send the POST to the server!
-        DEBUG_PRINTLN(post_rqst);
-        client.print(post_rqst);
+        DEBUG_PRINTLN(postRqst);
+        client.print(postRqst);
         client.stop();
         delay(500);
+    }
+
+    void setup() {
+
+      pinMode(A0, INPUT);
+
+      DEBUG_START(115200);
+      DEBUG_DELAY(100);
+     
+      // We start by connecting to a WiFi network
+      DEBUG_PRINTLN();
+      DEBUG_PRINTLN();
+      DEBUG_PRINT("Connecting to ");
+      DEBUG_PRINTLN(WIFI_SSID);
+
+      // stake time for timeout 
+      startMillis = millis();
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      
+      while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        DEBUG_PRINT(".");
+        if (millis()-startMillis > 10000) {
+          DEBUG_PRINTLN("WiFi timeout, go to sleep for 10 minutes");
+          ESP.deepSleep(10 * 60 * 1000000);
+        }
+      }
+
+      DEBUG_PRINTLN("");
+      DEBUG_PRINTLN("WiFi connected");  
+      DEBUG_PRINTLN("IP address: ");
+      DEBUG_PRINTLN(WiFi.localIP());
+
+      voltage = analogRead(A0) * 8.0913 / 1000;
+      if (voltage < 6.6) {
+        DEBUG_PRINTLN("Voltage low, go to sleep for 60 minutes");
+        ESP.deepSleep(60 * 60 * 1000000);
+      }
+
+      // Start up the DS sensor library
+      sensors.setResolution(12);
+      sensors.begin(); 
+    }
+     
+    
+    void loop() {
+
+      // call sensors.requestTemperatures() to issue a global temperature 
+      // request to all devices on the bus
+      sensors.requestTemperatures(); // Send the command to get temperatures
+      temperature = sensors.getTempCByIndex(0); 
+      temperature1 = sensors.getTempCByIndex(1);
+
+      DEBUG_PRINT("Temperatures - Device 0: ");
+      DEBUG_PRINT(temperature);
+      DEBUG_PRINT(" Device 1: ");
+      DEBUG_PRINT(temperature1);
+      DEBUG_PRINT(" - Voltage: ");
+      DEBUG_PRINTLN(voltage);
+
+      updateSparkFun();
+        
+      if (voltage < 6.8) {
+         DEBUG_PRINTLN("Voltage low");
+         triggerIfttt();
       }
       
       DEBUG_PRINTLN("Go to sleep");
       ESP.deepSleep(10 * 60 * 1000000);
       delay(100);
-      delay(2000);
     }
