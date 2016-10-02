@@ -152,10 +152,21 @@
         }
 
         // construct the POST request
-        String post_rqst = "POST /trigger/battery_low/with/key/" + String(IFTT_KEY) +" HTTP/1.1\r\n" + "Host: " + hostIfttt + "\r\n"
-                           "Content-Type: application/json\r\n" + "Content-Length: ");
+        char post_rqst[256];    // hand-calculated to be big enough
+
+        char *p = post_rqst;
+        p = append_str(p, "POST /trigger/");
+        p = append_str(p, "battery_low");
+        p = append_str(p, "/with/key/");
+        p = append_str(p, IFTT_KEY);
+        p = append_str(p, " HTTP/1.1\r\n");
+        p = append_str(p, "Host: maker.ifttt.com\r\n");
+        p = append_str(p, "Content-Type: application/json\r\n");
+        p = append_str(p, "Content-Length: ");
 
         // we need to remember where the content length will go, which is:
+        char *content_length_here = p;
+
         // it's always two digits, so reserve space for them (the NN)
         p = append_str(p, "NN\r\n");
 
